@@ -8,7 +8,7 @@ const archiver = require("archiver");
 const app = express();
 const PORT = process.env.PORT || 4000;
 
-const ROOT = __dirname;
+const ROOT = "/tmp";
 const UPLOAD_DIR = path.join(ROOT, "uploads");
 const OUTPUT_DIR = path.join(ROOT, "paquetes");
 
