@@ -184,7 +184,7 @@ app.get('/descargar/:filename', (req, res) => {
 // Ruta para el webhook de WhatsApp
 app.get('/webhook/whatsapp', (req, res) => {
   // Verificación del webhook
-  const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN || 'tu_token_de_verificacion';
+  const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN || '11c9ece49b666e60b530a53ffebe937c7f1162ec';
   
   // Verificar el token
   if (
