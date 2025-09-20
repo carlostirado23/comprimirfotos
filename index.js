@@ -181,6 +181,142 @@ app.get('/descargar/:filename', (req, res) => {
   });
 });
 
+// Ruta para el webhook de WhatsApp
+app.get('/webhook/whatsapp', (req, res) => {
+  // Verificación del webhook
+  const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN || 'tu_token_de_verificacion';
+  
+  // Verificar el token
+  if (
+    req.query['hub.mode'] === 'subscribe' &&
+    req.query['hub.verify_token'] === verifyToken
+  ) {
+    console.log('Webhook verificado correctamente');
+    return res.status(200).send(req.query['hub.challenge']);
+  }
+  
+  console.error('Error en la verificación del webhook');
+  return res.sendStatus(403);
+});
+
+// Manejar mensajes entrantes de WhatsApp
+app.post('/webhook/whatsapp', express.json(), async (req, res) => {
+  console.log('Webhook de WhatsApp recibido:', JSON.stringify(req.body, null, 2));
+  
+  // Verificar si es una actualización de estado de mensaje
+  if (req.body.entry?.[0]?.changes?.[0]?.value?.statuses) {
+    console.log('Actualización de estado de mensaje de WhatsApp:', 
+      req.body.entry[0].changes[0].value.statuses[0]);
+    return res.status(200).json({ status: 'ok' });
+  }
+
+  // Verificar si hay mensajes
+  const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+  if (!message) {
+    console.log('No se encontraron mensajes en el webhook');
+    return res.status(200).json({ status: 'ok' });
+  }
+
+  try {
+    // Si es un mensaje con archivo adjunto
+    if (message.type === 'image' || message.type === 'document') {
+      console.log('Mensaje con archivo adjunto recibido:', message.type);
+      
+      // Obtener información del archivo
+      const mediaType = message.type;
+      const mediaId = message[mediaType]?.id;
+      const mimeType = message[mediaType]?.mime_type || 
+                      (mediaType === 'image' ? 'image/jpeg' : 'application/octet-stream');
+      const fileExt = mediaType === 'image' ? 'jpg' : 
+                     message[mediaType]?.filename?.split('.').pop() || 'bin';
+      
+      if (!mediaId) {
+        console.error('ID de archivo no encontrado en el mensaje');
+        return res.status(400).json({ 
+          success: false, 
+          error: 'ID de archivo no encontrado' 
+        });
+      }
+
+      // Crear un archivo temporal con la información del mensaje
+      const fileName = `whatsapp-${Date.now()}.${fileExt}`;
+      const filePath = path.join(UPLOAD_DIR, fileName);
+      
+      // Aquí deberías implementar la descarga del archivo de la API de WhatsApp
+      // Por ahora, solo guardamos la información del mensaje
+      const fileInfo = {
+        fieldname: 'files',
+        originalname: message[mediaType]?.filename || fileName,
+        encoding: '7bit',
+        mimetype: mimeType,
+        destination: UPLOAD_DIR,
+        filename: fileName,
+        path: filePath,
+        size: message[mediaType]?.file_size || 0,
+        whatsappMediaId: mediaId,
+        metadata: JSON.stringify({
+          from: message.from,
+          timestamp: message.timestamp,
+          messageId: message.id
+        })
+      };
+
+      // Guardar la información del archivo
+      await fs.promises.writeFile(filePath, JSON.stringify(fileInfo, null, 2));
+      console.log(`Archivo temporal creado: ${filePath}`);
+
+      // Crear ZIP
+      const timestamp = Date.now();
+      const zipFilename = `whatsapp-${timestamp}.zip`;
+      const zipPath = path.join(OUTPUT_DIR, zipFilename);
+      
+      await createZip([fileInfo], zipPath);
+      
+      // Construir URL de descarga
+      const downloadUrl = `${req.protocol}://${req.get('host')}/descargar/${zipFilename}`;
+      
+      // Limpiar archivo temporal después de un tiempo
+      setTimeout(() => {
+        fs.unlink(filePath, err => {
+          if (err) console.error('Error al eliminar archivo temporal:', err);
+        });
+      }, 5000);
+
+      console.log('Archivo ZIP creado exitosamente:', zipPath);
+      
+      // Enviar respuesta a WhatsApp (opcional)
+      // Aquí podrías implementar el envío de un mensaje de confirmación
+      
+      return res.json({
+        success: true,
+        message: 'Archivo recibido y procesado',
+        downloadUrl: downloadUrl,
+        filename: zipFilename,
+        mediaType: mediaType,
+        whatsappMessageId: message.id
+      });
+    }
+
+    // Si es un mensaje de texto
+    console.log('Mensaje de texto recibido:', message.text?.body);
+    return res.json({ 
+      success: true, 
+      type: 'text',
+      text: message.text?.body,
+      message: 'Mensaje de texto recibido correctamente',
+      whatsappMessageId: message.id
+    });
+
+  } catch (error) {
+    console.error('Error en el webhook de WhatsApp:', error);
+    return res.status(500).json({ 
+      success: false, 
+      error: 'Error al procesar el mensaje',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
 // Manejo de errores
 app.use((err, req, res, next) => {
   console.error('Error no manejado:', err);
